@@ -84,6 +84,19 @@ impl GenericOAuthProvider {
                     )
                     .await?
                 }
+                GenericOAuthProfileSource::UnverifiedIdTokenThenUserInfo => {
+                    match id_token::unverified_user_info(&tokens)? {
+                        Some(user) => Some(user),
+                        None => {
+                            user_info::get_user_info(
+                                &tokens,
+                                self.config.user_info_url.as_deref(),
+                                self.http_client()?,
+                            )
+                            .await?
+                        }
+                    }
+                }
             }
         };
         if let Some(map_profile) = &self.config.map_profile_to_user {

@@ -229,6 +229,155 @@ async fn provider_ignores_unverified_id_token_claims_without_userinfo() -> Resul
 }
 
 #[tokio::test]
+async fn provider_unverified_id_token_mode_maps_unsigned_claims(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let provider = provider(unverified_id_token_config());
+    let Some(user) = provider
+        .get_user_info(
+            OAuth2Tokens {
+                id_token: Some(jwt_claims(
+                    r#"{"sub":"forged-sub","email":"forged@example.com","name":"Forged","picture":"https://img.example.com/forged.png","email_verified":true}"#,
+                )),
+                ..OAuth2Tokens::default()
+            },
+            None,
+        )
+        .await?
+    else {
+        return Err("missing unverified user info".into());
+    };
+
+    assert_eq!(user.id, "forged-sub");
+    assert_eq!(user.email.as_deref(), Some("forged@example.com"));
+    assert_eq!(user.name.as_deref(), Some("Forged"));
+    assert_eq!(
+        user.image.as_deref(),
+        Some("https://img.example.com/forged.png")
+    );
+    assert!(user.email_verified);
+    Ok(())
+}
+
+#[tokio::test]
+async fn provider_unverified_id_token_mode_falls_back_to_userinfo_when_email_missing(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let userinfo_request = Arc::new(Mutex::new(String::new()));
+    let user_info_url = capture_get_server(
+        Arc::clone(&userinfo_request),
+        r#"{"sub":"userinfo-sub","email":"userinfo@example.com","name":"User Info","email_verified":true}"#,
+    );
+    let mut config = loopback_http_config(unverified_id_token_config());
+    config.user_info_url = Some(user_info_url);
+    let provider = provider(config);
+    let Some(user) = provider
+        .get_user_info(
+            OAuth2Tokens {
+                access_token: Some("access-1".to_owned()),
+                id_token: Some(jwt_claims(r#"{"sub":"forged-sub","name":"Forged"}"#)),
+                ..OAuth2Tokens::default()
+            },
+            None,
+        )
+        .await?
+    else {
+        return Err("missing userinfo fallback user".into());
+    };
+
+    assert_eq!(user.id, "userinfo-sub");
+    assert_eq!(user.email.as_deref(), Some("userinfo@example.com"));
+    let userinfo_contains_authorization = userinfo_request
+        .lock()
+        .map(|request| request.contains("authorization: Bearer access-1"))
+        .unwrap_or(false);
+    assert!(userinfo_contains_authorization);
+    Ok(())
+}
+
+#[tokio::test]
+async fn provider_unverified_id_token_mode_rejects_malformed_id_token(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let provider = provider(unverified_id_token_config());
+    let result = provider
+        .get_user_info(
+            OAuth2Tokens {
+                access_token: Some("access-1".to_owned()),
+                id_token: Some("not-a-jwt".to_owned()),
+                ..OAuth2Tokens::default()
+            },
+            None,
+        )
+        .await;
+
+    assert!(result.is_err());
+    Ok(())
+}
+
+#[tokio::test]
+async fn provider_unverified_id_token_mode_still_applies_profile_mapper(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut config = unverified_id_token_config();
+    config.map_profile_to_user = Some(Arc::new(|mut profile: OAuth2UserInfo| {
+        Box::pin(async move {
+            profile.id = format!("mapped-{}", profile.id);
+            profile.email_verified = true;
+            Ok(profile)
+        })
+    }));
+    let provider = provider(config);
+    let Some(user) = provider
+        .get_user_info(
+            OAuth2Tokens {
+                id_token: Some(jwt_claims(
+                    r#"{"sub":"forged-sub","email":"forged@example.com","email_verified":false}"#,
+                )),
+                ..OAuth2Tokens::default()
+            },
+            None,
+        )
+        .await?
+    else {
+        return Err("missing mapped unverified user info".into());
+    };
+
+    assert_eq!(user.id, "mapped-forged-sub");
+    assert!(user.email_verified);
+    Ok(())
+}
+
+#[tokio::test]
+async fn provider_unverified_id_token_mode_custom_get_user_info_takes_precedence(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut config = unverified_id_token_config();
+    config.get_user_info = Some(Arc::new(|_tokens| {
+        Box::pin(async {
+            Ok(Some(OAuth2UserInfo {
+                id: "custom-user".to_owned(),
+                name: Some("Custom User".to_owned()),
+                email: Some("custom@example.com".to_owned()),
+                image: None,
+                email_verified: true,
+            }))
+        })
+    }));
+    let provider = provider(config);
+    let Some(user) = provider
+        .get_user_info(
+            OAuth2Tokens {
+                id_token: Some("not-a-jwt".to_owned()),
+                ..OAuth2Tokens::default()
+            },
+            None,
+        )
+        .await?
+    else {
+        return Err("missing custom user info".into());
+    };
+
+    assert_eq!(user.id, "custom-user");
+    Ok(())
+}
+
+#[tokio::test]
 async fn provider_verified_id_token_maps_claims() -> Result<(), Box<dyn std::error::Error>> {
     let nonce = "nonce-1";
     let user = verified_id_token_user_info(valid_id_token_claims(nonce), Some(nonce)).await?;

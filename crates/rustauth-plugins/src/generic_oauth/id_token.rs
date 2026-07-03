@@ -1,3 +1,5 @@
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
 use rustauth_oauth::oauth2::{
     validate_token, OAuth2Tokens, OAuth2UserInfo, OAuthError, OAuthHttpClient,
     TokenValidationOptions, ValidateTokenOptions,
@@ -7,6 +9,22 @@ use std::collections::BTreeSet;
 
 use super::config::{GenericOAuthConfig, GenericOAuthProfileSource};
 use super::user_info;
+
+pub(super) fn unverified_user_info(
+    tokens: &OAuth2Tokens,
+) -> Result<Option<OAuth2UserInfo>, OAuthError> {
+    let Some(id_token) = tokens.id_token.as_deref() else {
+        return Ok(None);
+    };
+    let profile = decode_unverified_jwt_payload(id_token)?;
+    if !has_non_empty_claim(&profile, "sub") || !has_non_empty_claim(&profile, "email") {
+        return Ok(None);
+    }
+    let Some(user) = user_info::user_info_from_claims(&profile) else {
+        return Ok(None);
+    };
+    Ok(Some(user))
+}
 
 pub(super) async fn verified_user_info(
     tokens: &OAuth2Tokens,
@@ -104,4 +122,28 @@ fn distinct_audience_count(audience: Option<&Value>) -> usize {
         .filter_map(Value::as_str)
         .collect::<BTreeSet<_>>()
         .len()
+}
+
+fn decode_unverified_jwt_payload(token: &str) -> Result<Value, OAuthError> {
+    if token.split('.').count() != 3 {
+        return Err(OAuthError::InvalidResponse(
+            "id_token must be a JWT with three segments".to_owned(),
+        ));
+    }
+    let payload = token
+        .split('.')
+        .nth(1)
+        .ok_or_else(|| OAuthError::InvalidResponse("id_token must contain a payload".to_owned()))?;
+    let decoded = URL_SAFE_NO_PAD
+        .decode(payload)
+        .map_err(|error| OAuthError::InvalidResponse(error.to_string()))?;
+    serde_json::from_slice(&decoded).map_err(|error| OAuthError::InvalidResponse(error.to_string()))
+}
+
+fn has_non_empty_claim(profile: &Value, claim: &str) -> bool {
+    match profile.get(claim) {
+        Some(Value::String(value)) => !value.is_empty(),
+        Some(Value::Number(_)) => true,
+        _ => false,
+    }
 }

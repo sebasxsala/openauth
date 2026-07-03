@@ -7,6 +7,12 @@ project follows [Semantic Versioning](https://semver.org/) while the API is stil
 
 ## [Unreleased]
 
+### Added
+
+- Generic OAuth now offers explicit opt-in unverified ID-token profile
+  extraction for Better Auth parity while keeping userinfo as the secure
+  default.
+
 ## [0.3.1](https://github.com/salasebas/rustauth/compare/v0.3.0...v0.3.1) - 2026-07-02
 
 ### Changed

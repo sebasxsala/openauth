@@ -898,6 +898,72 @@ async fn oauth2_callback_verified_id_token_custom_get_user_info_still_works(
     Ok(())
 }
 
+#[tokio::test]
+async fn oauth2_callback_unverified_id_token_mode_creates_user_without_userinfo(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (memory, context, response) = unverified_callback_response(
+        jwt_claims(
+            r#"{"sub":"forged-route-user","email":"forged@example.com","name":"Forged Route","picture":"https://img.example.com/forged-route.png","email_verified":true}"#,
+        ),
+        None,
+    )
+    .await?;
+
+    assert_eq!(response.status(), StatusCode::FOUND);
+    assert_eq!(location(&response), Some("/dashboard"));
+    let user = DbUserStore::new(memory.as_ref())
+        .find_user_by_email("forged@example.com")
+        .await?
+        .ok_or("missing unverified id token user")?;
+    assert_eq!(user.name, "Forged Route");
+    assert!(DbUserStore::new(memory.as_ref())
+        .find_account_by_provider_account("forged-route-user", "example")
+        .await?
+        .is_some());
+    let token = session_token_from_response(&context, &response);
+    assert!(DbSessionStore::new(memory.as_ref())
+        .find_session(&token)
+        .await?
+        .is_some());
+    Ok(())
+}
+
+#[tokio::test]
+async fn oauth2_callback_unverified_id_token_mode_falls_back_to_userinfo_when_email_missing(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let user_info_url = capture_get_server(
+        Arc::new(Mutex::new(String::new())),
+        r#"{"sub":"userinfo-route-user","email":"userinfo@example.com","name":"User Info Route","email_verified":true}"#,
+    );
+    let (memory, context, response) = unverified_callback_response(
+        jwt_claims(r#"{"sub":"forged-route-user","name":"Forged Route"}"#),
+        Some(user_info_url),
+    )
+    .await?;
+
+    assert_eq!(response.status(), StatusCode::FOUND);
+    assert_eq!(location(&response), Some("/dashboard"));
+    assert!(DbUserStore::new(memory.as_ref())
+        .find_user_by_email("forged@example.com")
+        .await?
+        .is_none());
+    let user = DbUserStore::new(memory.as_ref())
+        .find_user_by_email("userinfo@example.com")
+        .await?
+        .ok_or("missing userinfo fallback user")?;
+    assert_eq!(user.name, "User Info Route");
+    assert!(DbUserStore::new(memory.as_ref())
+        .find_account_by_provider_account("userinfo-route-user", "example")
+        .await?
+        .is_some());
+    let token = session_token_from_response(&context, &response);
+    assert!(DbSessionStore::new(memory.as_ref())
+        .find_session(&token)
+        .await?
+        .is_some());
+    Ok(())
+}
+
 async fn oidc_callback_response<F>(
     token_for_nonce: F,
 ) -> Result<(Arc<MemoryAdapter>, AuthContext, Response<Vec<u8>>), Box<dyn std::error::Error>>
@@ -954,6 +1020,39 @@ fn oidc_route_config(jwks_url: String, id_token: Arc<Mutex<Option<String>>>) -> 
         })
     }));
     config
+}
+
+async fn unverified_callback_response(
+    id_token: String,
+    user_info_url: Option<String>,
+) -> Result<(Arc<MemoryAdapter>, AuthContext, Response<Vec<u8>>), Box<dyn std::error::Error>> {
+    let memory = Arc::new(MemoryAdapter::new());
+    let adapter = memory.clone() as Arc<dyn DbAdapter>;
+    let mut config = loopback_http_config(unverified_id_token_config());
+    config.user_info_url = user_info_url;
+    config.get_token = Some(Arc::new(move |_request| {
+        let id_token = id_token.clone();
+        Box::pin(async move {
+            Ok(OAuth2Tokens {
+                access_token: Some("access-token".to_owned()),
+                id_token: Some(id_token),
+                ..OAuth2Tokens::default()
+            })
+        })
+    }));
+    let context = context_with_plugin(adapter, oauth_plugin(config));
+    let router = AuthRouter::try_new(context.clone(), Vec::new())?;
+    let (sign_in, oauth_state_cookie) =
+        sign_in_url_with_oauth_cookie(&router, "example", "/dashboard", None, false).await?;
+    let state = query_value(&sign_in, "state").ok_or("missing state")?;
+    let response = oauth_callback(
+        &router,
+        "example",
+        "code-1",
+        &state_with_oauth_cookie(state, oauth_state_cookie),
+    )
+    .await?;
+    Ok((memory, context, response))
 }
 
 fn route_id_token_claims(nonce: &str) -> Value {

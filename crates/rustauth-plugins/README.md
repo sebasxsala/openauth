@@ -167,6 +167,14 @@ issuer, client ID audience, expiration, subject, nonce, and authorized party
 when the token has multiple audiences before mapping claims. Existing
 `userinfo_url` and custom `get_user_info` flows remain supported.
 
+For Better Auth parity with providers that rely on decode-only ID-token
+profile claims, callers can explicitly opt into
+`GenericOAuthProfileSource::UnverifiedIdTokenThenUserInfo`. This mode decodes
+the JWT payload without verifying the signature or issuer/audience claims, uses
+it only when the decoded profile has both `sub` and `email`, and otherwise
+falls back to `userinfo_url`. Prefer the verified OIDC source for new
+integrations.
+
 ## Time units
 
 Public plugin and core option timeouts use [`time::Duration`](https://docs.rs/time/latest/time/struct.Duration.html).

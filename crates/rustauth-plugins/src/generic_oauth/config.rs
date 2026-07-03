@@ -63,6 +63,7 @@ pub enum GenericOAuthProfileSource {
     #[default]
     UserInfo,
     VerifiedIdToken(GenericOidcIdTokenProfile),
+    UnverifiedIdTokenThenUserInfo,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -311,6 +312,9 @@ impl GenericOAuthConfig {
             "profileSource": match self.profile_source {
                 GenericOAuthProfileSource::UserInfo => "userInfo",
                 GenericOAuthProfileSource::VerifiedIdToken(_) => "verifiedIdToken",
+                GenericOAuthProfileSource::UnverifiedIdTokenThenUserInfo => {
+                    "unverifiedIdTokenThenUserInfo"
+                }
             },
         })
     }

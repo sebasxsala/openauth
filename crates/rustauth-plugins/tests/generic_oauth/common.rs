@@ -81,6 +81,13 @@ pub(super) fn verified_id_token_config() -> GenericOAuthConfig {
     config
 }
 
+pub(super) fn unverified_id_token_config() -> GenericOAuthConfig {
+    let mut config = example_config();
+    config.user_info_url = None;
+    config.profile_source = GenericOAuthProfileSource::UnverifiedIdTokenThenUserInfo;
+    config
+}
+
 pub(super) fn provider(
     config: GenericOAuthConfig,
 ) -> rustauth_plugins::generic_oauth::GenericOAuthProvider {
