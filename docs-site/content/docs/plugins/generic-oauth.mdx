@@ -61,9 +61,65 @@ Each **`GenericOAuthConfig`** entry:
 | `pkce`                                              | PKCE settings                                                                    |
 | `disable_implicit_sign_up` / `disable_sign_up`      | Control auto-registration                                                        |
 | `authentication`                                    | Token endpoint auth method                                                       |
+| `profile_source`                                    | Choose `userinfo_url`, verified ID-token claims, or explicit unverified fallback |
 | Custom hooks                                        | `get_token`, `get_user_info`, `refresh_token`, `revoke_token`, `verify_id_token` |
 
 Issuer validation failures return `ISSUER_MISMATCH` or `ISSUER_MISSING`.
+
+## OIDC profile claims
+
+Generic OAuth reads profile data from `userinfo_url` by default. It does not
+trust `id_token` profile claims just because the token response includes one.
+
+For OIDC providers that return the profile only in `id_token`, use the verified
+profile source:
+
+```rust
+use rustauth::plugins::generic_oauth::{
+    GenericOAuthConfig, GenericOAuthProfileSource, GenericOidcIdTokenProfile,
+};
+
+let mut config = GenericOAuthConfig::discovery(
+    "idp",
+    "client-id",
+    Some("client-secret"),
+    "https://idp.example.com/.well-known/openid-configuration",
+);
+
+config.scopes = vec!["openid".into(), "email".into(), "profile".into()];
+config.profile_source = GenericOAuthProfileSource::VerifiedIdToken(
+    GenericOidcIdTokenProfile::new(),
+);
+```
+
+With discovery, RustAuth fills the issuer and JWKS URL from the provider
+metadata. Without discovery, configure both explicitly:
+
+```rust
+config.profile_source = GenericOAuthProfileSource::VerifiedIdToken(
+    GenericOidcIdTokenProfile::new()
+        .issuer("https://idp.example.com")
+        .jwks_url("https://idp.example.com/.well-known/jwks.json"),
+);
+```
+
+The verified path checks the JWKS signature, supported asymmetric algorithm,
+issuer, client ID audience, expiration, subject, nonce, and authorized party
+when a token has multiple audiences. RustAuth generates and validates the nonce
+for the OAuth callback flow when this profile source is enabled.
+
+For legacy or Better Auth parity cases that depend on decode-only ID-token
+claims, RustAuth also provides an explicit unsafe mode:
+
+```rust
+config.profile_source =
+    GenericOAuthProfileSource::UnverifiedIdTokenWithUserInfoFallback;
+```
+
+This mode decodes the JWT payload without verifying signature, issuer, audience,
+or nonce. It uses the decoded profile only when both `sub` and `email` are
+present, otherwise it falls back to `userinfo_url`. Prefer
+`VerifiedIdToken(...)` for new integrations.
 
 ## HTTP endpoints
 

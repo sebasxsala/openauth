@@ -84,7 +84,7 @@ impl GenericOAuthProvider {
                     )
                     .await?
                 }
-                GenericOAuthProfileSource::UnverifiedIdTokenThenUserInfo => {
+                GenericOAuthProfileSource::UnverifiedIdTokenWithUserInfoFallback => {
                     match id_token::unverified_user_info(&tokens)? {
                         Some(user) => Some(user),
                         None => {

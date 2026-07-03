@@ -60,10 +60,15 @@ pub struct GenericOAuthTokenRequest {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum GenericOAuthProfileSource {
+    /// Read profile data from a custom `get_user_info` hook or `userinfo_url`.
     #[default]
     UserInfo,
+    /// Verify and map OIDC `id_token` claims before trusting profile data.
     VerifiedIdToken(GenericOidcIdTokenProfile),
-    UnverifiedIdTokenThenUserInfo,
+    /// Decode `id_token` claims without verification, then fall back to `userinfo_url`.
+    ///
+    /// This is an insecure compatibility mode; prefer [`Self::VerifiedIdToken`] for OIDC.
+    UnverifiedIdTokenWithUserInfoFallback,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -312,8 +317,8 @@ impl GenericOAuthConfig {
             "profileSource": match self.profile_source {
                 GenericOAuthProfileSource::UserInfo => "userInfo",
                 GenericOAuthProfileSource::VerifiedIdToken(_) => "verifiedIdToken",
-                GenericOAuthProfileSource::UnverifiedIdTokenThenUserInfo => {
-                    "unverifiedIdTokenThenUserInfo"
+                GenericOAuthProfileSource::UnverifiedIdTokenWithUserInfoFallback => {
+                    "unverifiedIdTokenWithUserInfoFallback"
                 }
             },
         })

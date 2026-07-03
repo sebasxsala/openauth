@@ -84,7 +84,7 @@ pub(super) fn verified_id_token_config() -> GenericOAuthConfig {
 pub(super) fn unverified_id_token_config() -> GenericOAuthConfig {
     let mut config = example_config();
     config.user_info_url = None;
-    config.profile_source = GenericOAuthProfileSource::UnverifiedIdTokenThenUserInfo;
+    config.profile_source = GenericOAuthProfileSource::UnverifiedIdTokenWithUserInfoFallback;
     config
 }
 
