@@ -1,12 +1,6 @@
 {
   "version": 1,
   "skills": {
-    "m15-anti-pattern": {
-      "source": "zhanghandong/rust-skills",
-      "sourceType": "github",
-      "skillPath": "skills/m15-anti-pattern/SKILL.md",
-      "computedHash": "d9f5d80bd2ab49f063a61d90a96100298788ea0e1e5bd5e917be3c7e124078a2"
-    },
     "mongodb-connection": {
       "source": "mongodb/agent-skills",
       "sourceType": "github",
@@ -23,19 +17,13 @@
       "source": "mongodb/agent-skills",
       "sourceType": "github",
       "skillPath": "skills/mongodb-schema-design/SKILL.md",
-      "computedHash": "1324e3d2f8d0dc487a5d2921cd81f28e4c4205861ab5b2a9408ed68f758e9ac0"
+      "computedHash": "627fd7407c033de8364bd44a599adff29cbb863a71ebea88a2f8fe7170baa7cb"
     },
     "mysql-best-practices": {
       "source": "mindrally/skills",
       "sourceType": "github",
       "skillPath": "mysql-best-practices/SKILL.md",
       "computedHash": "02283efa91864ce6f56f542415bd69d9855be1ea33847987b15040394e828c23"
-    },
-    "postgresql-optimization": {
-      "source": "github/awesome-copilot",
-      "sourceType": "github",
-      "skillPath": "skills/postgresql-optimization/SKILL.md",
-      "computedHash": "8022448de70ba9a485e3b5bce34c5bbc644f93eb39b68431c9f7dabcf03aeb09"
     },
     "postgresql-table-design": {
       "source": "wshobson/agents",
@@ -55,29 +43,11 @@
       "skillPath": "skills/rust-best-practices/SKILL.md",
       "computedHash": "fd336f2f772eb46ddf8658de5f9dd8faa1f35615b316665307fc82eeb4b2e658"
     },
-    "rust-engineer": {
-      "source": "jeffallan/claude-skills",
-      "sourceType": "github",
-      "skillPath": "skills/rust-engineer/SKILL.md",
-      "computedHash": "f8093c6253afe24bbac3c3328c3ca07e9ef089758896ba10221ed0f2078cb2a0"
-    },
-    "rust-patterns": {
-      "source": "affaan-m/everything-claude-code",
-      "sourceType": "github",
-      "skillPath": "skills/rust-patterns/SKILL.md",
-      "computedHash": "99cc1d840bb3e5d911051b115e5da518f3f3ca74f3a8a3e89369c6da9298afa1"
-    },
     "rust-testing": {
       "source": "affaan-m/everything-claude-code",
       "sourceType": "github",
       "skillPath": "skills/rust-testing/SKILL.md",
-      "computedHash": "8f6cab4bcbdc5bd8c19f179e893ca5d502604a03e4e443bd27ba7c3a88a93add"
-    },
-    "sql-optimization": {
-      "source": "github/awesome-copilot",
-      "sourceType": "github",
-      "skillPath": "skills/sql-optimization/SKILL.md",
-      "computedHash": "47c930907f25d67454ac8c2d155785eae3dce72242960d0c0e9ebf2ced9cd231"
+      "computedHash": "9a8f2bb0e7aa498b56af699e4673fd3ec1f50c5cfe9019c86dc80a93ccd08e66"
     },
     "sql-optimization-patterns": {
       "source": "wshobson/agents",
