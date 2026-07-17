@@ -13,6 +13,9 @@ pub(crate) async fn validate_access_token(
         .await?
     {
         let active = timestamp(&record, "expires_at").is_some_and(|expires| expires > now());
+        if !active {
+            return Ok(Some(inactive_access_token()));
+        }
         let client_id = string(&record, "client_id");
         if authenticated_client_id
             .is_some_and(|expected_client_id| client_id.as_deref() != Some(expected_client_id))
@@ -53,17 +56,29 @@ pub(crate) async fn validate_access_token(
                     Some(user_id) => find_user(adapter, user_id).await?,
                     None => None,
                 };
-                map.extend(
-                    resolver
-                        .resolve(CustomAccessTokenClaimsInput {
-                            user,
-                            reference_id: string(&record, "reference_id"),
-                            scopes: scopes.clone(),
-                            resource: Vec::new(),
-                            metadata: client.and_then(|client| client.metadata),
-                        })
-                        .await?,
-                );
+                let mut custom_claims = resolver
+                    .resolve(CustomAccessTokenClaimsInput {
+                        user,
+                        reference_id: string(&record, "reference_id"),
+                        scopes: scopes.clone(),
+                        resource: Vec::new(),
+                        metadata: client.and_then(|client| client.metadata),
+                    })
+                    .await?;
+                custom_claims.retain(|claim, _| {
+                    !matches!(
+                        claim.as_str(),
+                        "active"
+                            | "token_type"
+                            | "client_id"
+                            | "sub"
+                            | "sid"
+                            | "exp"
+                            | "iat"
+                            | "scope"
+                    )
+                });
+                map.extend(custom_claims);
             }
         }
         return Ok(Some(ValidatedAccessToken {
@@ -205,6 +220,9 @@ async fn introspect_refresh_token(
             }
             let active = timestamp(&record, "revoked").is_none()
                 && timestamp(&record, "expires_at").is_some_and(|expires| expires > now());
+            if !active {
+                return Ok(serde_json::json!({ "active": false }));
+            }
             let sid = active_session_id_for_claims(adapter, string(&record, "session_id")).await?;
             let mut response = serde_json::json!({
                 "active": active,
