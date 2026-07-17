@@ -8,7 +8,6 @@ on:
       - release/0.3.0
   merge_group:
   workflow_dispatch:
-  workflow_dispatch:
 
 concurrency:
   group: integration-${{ github.workflow }}-${{ github.ref }}

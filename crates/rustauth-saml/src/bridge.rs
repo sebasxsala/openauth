@@ -14,7 +14,7 @@ use opensaml::idp::IdentityProvider;
 #[cfg(feature = "saml-signed")]
 use opensaml::logout::{
     create_logout_request_with_id, create_logout_response_with_id, parse_logout_request,
-    parse_logout_response,
+    parse_logout_response_without_request_id,
 };
 use opensaml::metadata::{Endpoint, IdpMetadataConfig, SpMetadataConfig};
 use opensaml::sp::ServiceProvider;
@@ -162,6 +162,7 @@ pub fn create_identity_provider(config: &SamlConfig) -> Result<IdentityProvider,
             name_id_format: Vec::new(),
             single_sign_on_service,
             single_logout_service,
+            elements_order: None,
         },
         idp_entity_setting(config),
     )
@@ -199,21 +200,20 @@ pub fn parse_login_response(
         .or_else(|| sp.metadata.get_entity_id().map(str::to_string))
         .unwrap_or_default();
 
-    flow(
-        &FlowOptions {
-            binding: Some(Binding::Post),
-            parser_type: Some(opensaml::constants::ParserType::SamlResponse),
-            check_signature,
-            from_issuer: idp.metadata.get_entity_id(),
-            signing_certs: &signing_certs,
-            decrypt_key,
-            decrypt_key_pass: decrypt_key.and(sp.setting.enc_private_key_pass.as_deref()),
-            clock_drifts: sp.setting.clock_drifts,
-            expected_audience: sp.setting.validate_audience.then_some(audience.as_str()),
-            expected_in_response_to: in_response_to.filter(|value| !value.is_empty()),
-        },
-        &request,
-    )
+    let mut options = FlowOptions::default();
+    options.binding = Some(Binding::Post);
+    options.parser_type = Some(opensaml::constants::ParserType::SamlResponse);
+    options.check_signature = check_signature;
+    options.from_issuer = idp.metadata.get_entity_id();
+    options.signing_certs = &signing_certs;
+    options.decrypt_key = decrypt_key;
+    options.decrypt_key_pass = decrypt_key.and(sp.setting.enc_private_key_pass.as_deref());
+    // Supplying a decryption key is RustAuth's explicit opt-in to software assertion decryption.
+    options.allow_insecure_software_rsa_key_transport_decryption = decrypt_key.is_some();
+    options.clock_drifts = sp.setting.clock_drifts;
+    options.expected_audience = sp.setting.validate_audience.then_some(audience.as_str());
+    options.expected_in_response_to = in_response_to.filter(|value| !value.is_empty());
+    flow(&options, &request)
 }
 
 #[cfg(feature = "saml-signed")]
@@ -307,7 +307,7 @@ pub fn parse_inbound_logout_response(
 ) -> Result<FlowResult, OpenSamlError> {
     let sp = create_service_provider(config, base_url, provider_id, opts)?;
     let idp = create_identity_provider(config)?;
-    parse_logout_response(&sp.setting, &idp.metadata, binding, request)
+    parse_logout_response_without_request_id(&sp.setting, &idp.metadata, binding, request)
 }
 
 #[cfg(feature = "saml-signed")]
@@ -350,30 +350,29 @@ pub fn assertion_id_from_saml_content(xml: &str) -> Option<String> {
 
 fn sp_entity_setting(config: &SamlConfig, opts: &SpBuildOptions) -> EntitySetting {
     let skew_ms = opts.clock_skew.as_millis().min(i64::MAX as u128) as i64;
-    let mut setting = EntitySetting {
-        entity_id: config
-            .sp_metadata
-            .entity_id
-            .clone()
-            .or_else(|| Some(config.issuer.clone())),
-        request_signature_algorithm: resolve_signature_algorithm(config),
-        authn_requests_signed: config.authn_requests_signed,
-        want_assertions_signed: config.want_assertions_signed,
-        want_message_signed: config.want_assertions_signed,
-        want_logout_request_signed: opts.want_logout_request_signed,
-        want_logout_response_signed: opts.want_logout_response_signed,
-        is_assertion_encrypted: config.sp_metadata.is_assertion_encrypted.unwrap_or(false),
-        private_key: secret_to_string(config.private_key.as_ref())
-            .or_else(|| secret_to_string(config.sp_metadata.private_key.as_ref())),
-        private_key_pass: secret_to_string(config.sp_metadata.private_key_pass.as_ref()),
-        signing_cert: sp_signing_certs(config).into_iter().next(),
-        enc_private_key: secret_to_string(config.decryption_pvk.as_ref())
-            .or_else(|| secret_to_string(config.sp_metadata.enc_private_key.as_ref())),
-        enc_private_key_pass: secret_to_string(config.sp_metadata.enc_private_key_pass.as_ref()),
-        clock_drifts: (-skew_ms, skew_ms),
-        relay_state: opts.relay_state.clone().unwrap_or_default(),
-        ..EntitySetting::default()
-    };
+    let mut setting = EntitySetting::default();
+    setting.entity_id = config
+        .sp_metadata
+        .entity_id
+        .clone()
+        .or_else(|| Some(config.issuer.clone()));
+    setting.request_signature_algorithm = resolve_signature_algorithm(config);
+    setting.authn_requests_signed = config.authn_requests_signed;
+    setting.want_assertions_signed = config.want_assertions_signed;
+    setting.want_message_signed = config.want_assertions_signed;
+    setting.want_logout_request_signed = opts.want_logout_request_signed;
+    setting.want_logout_response_signed = opts.want_logout_response_signed;
+    setting.is_assertion_encrypted = config.sp_metadata.is_assertion_encrypted.unwrap_or(false);
+    setting.private_key = secret_to_string(config.private_key.as_ref())
+        .or_else(|| secret_to_string(config.sp_metadata.private_key.as_ref()));
+    setting.private_key_pass = secret_to_string(config.sp_metadata.private_key_pass.as_ref());
+    setting.signing_cert = sp_signing_certs(config).into_iter().next();
+    setting.enc_private_key = secret_to_string(config.decryption_pvk.as_ref())
+        .or_else(|| secret_to_string(config.sp_metadata.enc_private_key.as_ref()));
+    setting.enc_private_key_pass =
+        secret_to_string(config.sp_metadata.enc_private_key_pass.as_ref());
+    setting.clock_drifts = (-skew_ms, skew_ms);
+    setting.relay_state = opts.relay_state.clone().unwrap_or_default();
     if let Some(format) = &config.identifier_format {
         setting.name_id_format = vec![format.clone()];
     }
@@ -391,15 +390,14 @@ fn sp_entity_setting(config: &SamlConfig, opts: &SpBuildOptions) -> EntitySettin
 }
 
 fn idp_entity_setting(config: &SamlConfig) -> EntitySetting {
-    EntitySetting {
-        entity_id: config
-            .idp_metadata
-            .as_ref()
-            .and_then(|idp| idp.entity_id.clone())
-            .or_else(|| Some(config.issuer.clone())),
-        want_authn_requests_signed: config.authn_requests_signed,
-        ..EntitySetting::default()
-    }
+    let mut setting = EntitySetting::default();
+    setting.entity_id = config
+        .idp_metadata
+        .as_ref()
+        .and_then(|idp| idp.entity_id.clone())
+        .or_else(|| Some(config.issuer.clone()));
+    setting.want_authn_requests_signed = config.authn_requests_signed;
+    setting
 }
 
 fn sp_signing_certs(config: &SamlConfig) -> Vec<String> {

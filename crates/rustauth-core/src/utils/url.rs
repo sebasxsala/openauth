@@ -96,10 +96,9 @@ fn split_host_and_port(host: &str) -> Option<(&str, Option<&str>)> {
         let rest = &host[end + 1..];
         let port = if rest.is_empty() {
             None
-        } else if let Some(port) = rest.strip_prefix(':') {
-            Some(port)
         } else {
-            return None;
+            let port = rest.strip_prefix(':')?;
+            Some(port)
         };
         return Some((name, port));
     }

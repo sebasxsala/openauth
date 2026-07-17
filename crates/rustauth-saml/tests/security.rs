@@ -41,6 +41,10 @@ fn sp_signing_cert_pem() -> &'static str {
 
 #[cfg(feature = "saml-signed")]
 fn signed_login_response(in_response_to: &str) -> Result<String, Box<dyn std::error::Error>> {
+    let mut idp_setting = EntitySetting::default();
+    idp_setting.private_key = Some(sp_private_key_pem().to_owned());
+    idp_setting.signing_cert = Some(sp_signing_cert_pem().to_owned());
+    idp_setting.request_signature_algorithm = RSA_SHA256.to_owned();
     let idp = IdentityProvider::from_config(
         &IdpMetadataConfig {
             entity_id: "https://idp.example.com".to_owned(),
@@ -52,13 +56,13 @@ fn signed_login_response(in_response_to: &str) -> Result<String, Box<dyn std::er
             )],
             ..Default::default()
         },
-        EntitySetting {
-            private_key: Some(sp_private_key_pem().to_owned()),
-            signing_cert: Some(sp_signing_cert_pem().to_owned()),
-            request_signature_algorithm: RSA_SHA256.to_owned(),
-            ..Default::default()
-        },
+        idp_setting,
     )?;
+    let mut sp_setting = EntitySetting::default();
+    sp_setting.entity_id = Some("https://sp.example.com/entity".to_owned());
+    sp_setting.private_key = Some(sp_private_key_pem().to_owned());
+    sp_setting.signing_cert = Some(sp_signing_cert_pem().to_owned());
+    sp_setting.request_signature_algorithm = RSA_SHA256.to_owned();
     let sp = ServiceProvider::from_config(
         &SpMetadataConfig {
             entity_id: "https://sp.example.com/entity".to_owned(),
@@ -71,13 +75,7 @@ fn signed_login_response(in_response_to: &str) -> Result<String, Box<dyn std::er
             )],
             ..Default::default()
         },
-        EntitySetting {
-            entity_id: Some("https://sp.example.com/entity".to_owned()),
-            private_key: Some(sp_private_key_pem().to_owned()),
-            signing_cert: Some(sp_signing_cert_pem().to_owned()),
-            request_signature_algorithm: RSA_SHA256.to_owned(),
-            ..Default::default()
-        },
+        sp_setting,
     )?;
     let response = idp.create_login_response(
         &sp,
@@ -335,6 +333,30 @@ fn parse_saml_response_extracts_audience_restrictions() -> Result<(), Box<dyn st
             "https://sp.example.com/entity".to_owned(),
             "https://sp.example.com/secondary".to_owned()
         ]
+    );
+    Ok(())
+}
+
+#[test]
+fn parse_saml_response_decodes_xml_references_in_audience_values(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let xml = r#"
+        <samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">
+            <saml:Assertion ID="assertion-1">
+                <saml:Conditions>
+                    <saml:AudienceRestriction>
+                        <saml:Audience>https://sp.example.com/entity?tenant=acme&amp;region=us&#x2D;east</saml:Audience>
+                    </saml:AudienceRestriction>
+                </saml:Conditions>
+            </saml:Assertion>
+        </samlp:Response>
+    "#;
+
+    let parsed = parse_saml_response(&encode_saml_xml(xml))?;
+
+    assert_eq!(
+        parsed.assertion.audiences,
+        vec!["https://sp.example.com/entity?tenant=acme&region=us-east".to_owned()]
     );
     Ok(())
 }

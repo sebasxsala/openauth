@@ -33,13 +33,11 @@ pub fn idp_signing_cert_pem() -> &'static str {
 }
 
 fn signing_setting(private_key: &str, cert: &str) -> EntitySetting {
-    EntitySetting {
-        private_key: Some(private_key.to_owned()),
-        signing_cert: Some(cert.to_owned()),
-        request_signature_algorithm: RSA_SHA256.to_owned(),
-        entity_id: None,
-        ..Default::default()
-    }
+    let mut setting = EntitySetting::default();
+    setting.private_key = Some(private_key.to_owned());
+    setting.signing_cert = Some(cert.to_owned());
+    setting.request_signature_algorithm = RSA_SHA256.to_owned();
+    setting
 }
 
 pub fn test_idp() -> Result<IdentityProvider, Box<dyn std::error::Error>> {
@@ -84,6 +82,11 @@ pub fn test_sp(
     authn_signed: bool,
     want_signed: bool,
 ) -> Result<ServiceProvider, Box<dyn std::error::Error>> {
+    let mut setting = signing_setting(sp_private_key_pem(), sp_signing_cert_pem());
+    setting.entity_id = Some(SP_ENTITY_ID.to_owned());
+    setting.authn_requests_signed = authn_signed;
+    setting.want_assertions_signed = want_signed;
+    setting.enc_private_key = Some(sp_private_key_pem().to_owned());
     Ok(ServiceProvider::from_config(
         &SpMetadataConfig {
             entity_id: SP_ENTITY_ID.to_owned(),
@@ -97,16 +100,7 @@ pub fn test_sp(
             ],
             ..Default::default()
         },
-        EntitySetting {
-            entity_id: Some(SP_ENTITY_ID.to_owned()),
-            private_key: Some(sp_private_key_pem().to_owned()),
-            signing_cert: Some(sp_signing_cert_pem().to_owned()),
-            request_signature_algorithm: RSA_SHA256.to_owned(),
-            authn_requests_signed: authn_signed,
-            want_assertions_signed: want_signed,
-            enc_private_key: Some(sp_private_key_pem().to_owned()),
-            ..Default::default()
-        },
+        setting,
     )?)
 }
 

@@ -350,7 +350,7 @@ fn attr(
         let attribute = attribute.map_err(|error| RustAuthError::Api(error.to_string()))?;
         if local_name(attribute.key.as_ref())? == name {
             return attribute
-                .decode_and_unescape_value(reader.decoder())
+                .decoded_and_normalized_value(quick_xml::XmlVersion::Implicit1_0, reader.decoder())
                 .map(|value| Some(value.into_owned()))
                 .map_err(|error| RustAuthError::Api(error.to_string()));
         }

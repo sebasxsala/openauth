@@ -15,7 +15,7 @@ use crate::options::SamlConfig;
 use super::encryption::{decrypt_encrypted_assertion_response, SamlAssertionDecryptionError};
 use super::security::{collect_saml_runtime_algorithms, SamlConditions, SamlRuntimeAlgorithms};
 use super::signature::SamlSignatureInfo;
-use super::xml::{local_name, validate_saml_xml};
+use super::xml::{decode_xml_reference, decode_xml_text, local_name, validate_saml_xml};
 
 pub const ENCRYPTED_ASSERTION_UNSUPPORTED: &str = "Encrypted SAML assertions are not supported";
 
@@ -388,7 +388,14 @@ fn extract_assertion_attributes_from_xml(xml: &str) -> BTreeMap<String, String> 
             }
             Ok(Event::Text(text)) => {
                 if current_attribute.is_some() {
-                    if let Ok(value) = text.unescape() {
+                    if let Ok(value) = decode_xml_text(&text) {
+                        current_text.push_str(&value);
+                    }
+                }
+            }
+            Ok(Event::GeneralRef(reference)) => {
+                if current_attribute.is_some() {
+                    if let Ok(value) = decode_xml_reference(&reference) {
                         current_text.push_str(&value);
                     }
                 }
@@ -539,8 +546,13 @@ fn parse_saml_response_xml_detailed(
             }
             Ok(Event::Text(text)) => {
                 state.current_text.push_str(
-                    &text
-                        .unescape()
+                    &decode_xml_text(&text)
+                        .map_err(|error| SamlResponseParseError::InvalidXml(error.to_string()))?,
+                );
+            }
+            Ok(Event::GeneralRef(reference)) => {
+                state.current_text.push_str(
+                    &decode_xml_reference(&reference)
                         .map_err(|error| SamlResponseParseError::InvalidXml(error.to_string()))?,
                 );
             }
@@ -824,7 +836,7 @@ fn attr(
         let attribute = attribute.map_err(|error| RustAuthError::Api(error.to_string()))?;
         if local_name(attribute.key.as_ref())? == name {
             return attribute
-                .decode_and_unescape_value(reader.decoder())
+                .decoded_and_normalized_value(quick_xml::XmlVersion::Implicit1_0, reader.decoder())
                 .map(|value| Some(value.into_owned()))
                 .map_err(|error| RustAuthError::Api(error.to_string()));
         }
