@@ -1,0 +1,23 @@
+[package]
+name = "rustauth-integration-tests"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dev-dependencies]
+http.workspace = true
+rustauth.workspace = true
+rustauth-core = { workspace = true, features = ["test-utils"] }
+rustauth-fred.workspace = true
+rustauth-plugins.workspace = true
+rustauth-redis.workspace = true
+serde_json.workspace = true
+time.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+url.workspace = true
+
+[lints]
+workspace = true

@@ -68,6 +68,20 @@ jobs:
           package: rustauth,rustauth-core,rustauth-oauth,rustauth-plugins,rustauth-sqlx
           release-type: major
 
+  release-order:
+    name: Release order
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Test release-order checker
+        run: python3 -m unittest discover -s scripts/tests -p 'test_check_release_order.py'
+
+      - name: Check release order
+        run: python3 scripts/check_release_order.py
+
   test-crate:
     name: Test ${{ matrix.package }}
     runs-on: ubuntu-latest
@@ -78,6 +92,8 @@ jobs:
           - package: rustauth
             nextest_args: --all-features
           - package: rustauth-core
+            nextest_args: --all-features
+          - package: rustauth-fred
             nextest_args: --all-features
           - package: rustauth-oauth
             nextest_args: --all-features
@@ -141,6 +157,7 @@ jobs:
     needs:
       - fmt
       - clippy
+      - release-order
       - semver
       - test-crate
     if: always()
