@@ -2,6 +2,7 @@
 name = "rustauth-integration-tests"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 publish = false
 
 [lib]
