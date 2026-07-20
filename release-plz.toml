@@ -95,6 +95,11 @@ name = "rustauth-fred"
 version_group = "rustauth-workspace"
 
 [[package]]
+name = "rustauth-integration-tests"
+publish = false
+release = false
+
+[[package]]
 name = "rustauth-i18n"
 version_group = "rustauth-workspace"
 

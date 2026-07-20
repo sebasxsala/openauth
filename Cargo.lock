@@ -4465,15 +4465,9 @@ name = "rustauth-fred"
 version = "0.3.1"
 dependencies = [
  "fred",
- "http 1.4.2",
- "rustauth",
  "rustauth-core",
- "rustauth-plugins",
- "rustauth-redis",
- "serde_json",
  "time",
  "tokio",
- "url",
 ]
 
 [[package]]
@@ -4488,6 +4482,22 @@ dependencies = [
  "thiserror 2.0.18",
  "time",
  "tokio",
+]
+
+[[package]]
+name = "rustauth-integration-tests"
+version = "0.3.1"
+dependencies = [
+ "http 1.4.2",
+ "rustauth",
+ "rustauth-core",
+ "rustauth-fred",
+ "rustauth-plugins",
+ "rustauth-redis",
+ "serde_json",
+ "time",
+ "tokio",
+ "url",
 ]
 
 [[package]]

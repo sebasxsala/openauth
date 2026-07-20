@@ -10,6 +10,7 @@ members = [
     "crates/rustauth-diesel",
     "crates/rustauth-fred",
     "crates/rustauth-i18n",
+    "crates/rustauth-integration-tests",
     "crates/rustauth-oauth",
     "crates/rustauth-oauth-provider",
     "crates/rustauth-oidc",

@@ -90,7 +90,7 @@ jobs:
               --test-threads 1
               -E 'not test(schema_and_provider_store_work_when_configured)'
             doc_tests: true
-          - package: rustauth-fred
+          - package: rustauth-integration-tests
             services: redis valkey
             nextest_args: --all-features
           - package: rustauth-redis
