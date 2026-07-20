@@ -93,7 +93,7 @@ rustauth-axum = { path = "crates/rustauth-axum", version = "0.3.1" }
 rustauth-cli = { path = "crates/rustauth-cli", version = "0.3.1" }
 openidconnect = { version = "4.0.1", default-features = false, features = ["reqwest", "rustls-tls"] }
 publicsuffix2 = { version = "0.5.2", default-features = false, features = ["std", "idna"] }
-quick-xml = "0.37.5"
+quick-xml = "0.41"
 rand = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 scrypt = "0.11"
@@ -116,7 +116,7 @@ uuid = { version = "1", features = ["serde", "v4", "v5"] }
 webauthn-rs = { version = "0.5", features = ["conditional-ui", "danger-allow-state-serialisation", "danger-credential-internals"] }
 webauthn-rs-core = "=0.5.5"
 x509-parser = "0.18"
-opensaml = { git = "https://github.com/sebasxsala/opensaml-rs", rev = "d65e77da80e835d91dc6ff830ab6e8bf1f2292bf", version = "0.1.0", default-features = false }
+opensaml = { git = "https://github.com/sebasxsala/opensaml-rs", rev = "c857a2b85a46e2a3df2dea43d2e5e1fdb1e4f2ff", version = "0.1.4", default-features = false }
 
 [profile.test]
 debug = 1

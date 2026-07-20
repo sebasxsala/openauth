@@ -142,13 +142,12 @@ pub fn register_idp_fixture_body_with_options(
 }
 
 fn signing_setting(private_key: &str, cert: &str, entity_id: &str) -> EntitySetting {
-    EntitySetting {
-        entity_id: Some(entity_id.to_owned()),
-        private_key: Some(private_key.to_owned()),
-        signing_cert: Some(cert.to_owned()),
-        request_signature_algorithm: RSA_SHA256.to_owned(),
-        ..Default::default()
-    }
+    let mut setting = EntitySetting::default();
+    setting.entity_id = Some(entity_id.to_owned());
+    setting.private_key = Some(private_key.to_owned());
+    setting.signing_cert = Some(cert.to_owned());
+    setting.request_signature_algorithm = RSA_SHA256.to_owned();
+    setting
 }
 
 pub fn idp_for_fixture(
@@ -184,6 +183,8 @@ pub fn idp_for_fixture(
 }
 
 pub fn sp_for_fixture(kind: IdpFixtureKind) -> Result<ServiceProvider, Box<dyn std::error::Error>> {
+    let mut setting = signing_setting(sp_private_key_pem(), sp_signing_cert_pem(), SP_ENTITY_ID);
+    setting.want_assertions_signed = true;
     Ok(ServiceProvider::from_config(
         &SpMetadataConfig {
             entity_id: SP_ENTITY_ID.to_owned(),
@@ -193,14 +194,7 @@ pub fn sp_for_fixture(kind: IdpFixtureKind) -> Result<ServiceProvider, Box<dyn s
             assertion_consumer_service: vec![Endpoint::new(Binding::Post, kind.acs_url())],
             ..Default::default()
         },
-        EntitySetting {
-            entity_id: Some(SP_ENTITY_ID.to_owned()),
-            private_key: Some(sp_private_key_pem().to_owned()),
-            signing_cert: Some(sp_signing_cert_pem().to_owned()),
-            request_signature_algorithm: RSA_SHA256.to_owned(),
-            want_assertions_signed: true,
-            ..Default::default()
-        },
+        setting,
     )?)
 }
 

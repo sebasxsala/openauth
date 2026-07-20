@@ -127,22 +127,12 @@ fn verify_post_message(
         let param = parser_type.query_param();
         let request = HttpRequest::post(vec![(param.to_owned(), compact)]);
         let certs = [cert.to_owned()];
-        flow(
-            &FlowOptions {
-                binding: Some(Binding::Post),
-                parser_type: Some(parser_type),
-                check_signature: true,
-                from_issuer: None,
-                signing_certs: &certs,
-                decrypt_key: None,
-                decrypt_key_pass: None,
-                clock_drifts: (0, 0),
-                expected_audience: None,
-                expected_in_response_to: None,
-            },
-            &request,
-        )
-        .map_err(map_verify_error)?;
+        let mut options = FlowOptions::default();
+        options.binding = Some(Binding::Post);
+        options.parser_type = Some(parser_type);
+        options.check_signature = true;
+        options.signing_certs = &certs;
+        flow(&options, &request).map_err(map_verify_error)?;
         let element = if signature.assertion {
             SamlSignedElement::Assertion
         } else {
@@ -200,22 +190,12 @@ fn verify_redirect_signature(
         let mut request = HttpRequest::redirect(query);
         request.octet_string = Some(octet);
         let certs = [cert.to_owned()];
-        flow(
-            &FlowOptions {
-                binding: Some(Binding::Redirect),
-                parser_type: Some(parser_type),
-                check_signature: true,
-                from_issuer: None,
-                signing_certs: &certs,
-                decrypt_key: None,
-                decrypt_key_pass: None,
-                clock_drifts: (0, 0),
-                expected_audience: None,
-                expected_in_response_to: None,
-            },
-            &request,
-        )
-        .map_err(map_verify_error)?;
+        let mut options = FlowOptions::default();
+        options.binding = Some(Binding::Redirect);
+        options.parser_type = Some(parser_type);
+        options.check_signature = true;
+        options.signing_certs = &certs;
+        flow(&options, &request).map_err(map_verify_error)?;
         Ok(())
     }
     #[cfg(not(feature = "saml-signed"))]

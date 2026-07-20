@@ -43,8 +43,11 @@ pub fn decrypt_encrypted_assertion_response(
         }
         let key = opensaml::crypto::keys::load_private_key(private_key_pem, None)
             .map_err(|_| SamlAssertionDecryptionError::InvalidPrivateKey)?;
-        let (response, _) =
-            opensaml::crypto::decrypt_assertion(xml, &key).map_err(map_decryption_error)?;
+        let mut options = opensaml::crypto::AssertionDecryptionOptions::default();
+        // Calling this explicit decryption API with a PEM key opts in to software decryption.
+        options.allow_insecure_software_rsa_key_transport_decryption = true;
+        let (response, _) = opensaml::crypto::decrypt_assertion(xml, &key, options)
+            .map_err(map_decryption_error)?;
         Ok(response)
     }
     #[cfg(not(feature = "saml-signed"))]

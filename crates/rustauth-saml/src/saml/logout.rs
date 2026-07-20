@@ -18,7 +18,7 @@ use crate::bridge::{
 use crate::options::SamlConfig;
 use crate::saml_impl::metadata::first_single_logout_service_location;
 use crate::saml_impl::signature::SamlSignatureInfo;
-use crate::saml_impl::xml::{local_name, validate_saml_xml};
+use crate::saml_impl::xml::{decode_xml_reference, decode_xml_text, local_name, validate_saml_xml};
 use opensaml::constants::Binding;
 #[cfg(feature = "saml-signed")]
 use opensaml::flow::HttpRequest;
@@ -762,11 +762,10 @@ fn parse_logout_request_xml(xml: &str) -> Result<ParsedSamlLogoutRequest, RustAu
                 }
             }
             Ok(Event::Text(text)) => {
-                current_text.push_str(
-                    &text
-                        .unescape()
-                        .map_err(|error| RustAuthError::Api(error.to_string()))?,
-                );
+                current_text.push_str(&decode_xml_text(&text)?);
+            }
+            Ok(Event::GeneralRef(reference)) => {
+                current_text.push_str(&decode_xml_reference(&reference)?);
             }
             Ok(Event::End(element)) => {
                 match local_name(element.name().as_ref())?.as_str() {
@@ -903,7 +902,7 @@ fn attribute_value(
         let attr = attr.map_err(|error| RustAuthError::Api(error.to_string()))?;
         if local_name(attr.key.as_ref())? == name {
             return attr
-                .decode_and_unescape_value(reader.decoder())
+                .decoded_and_normalized_value(quick_xml::XmlVersion::Implicit1_0, reader.decoder())
                 .map(|value| Some(value.into_owned()))
                 .map_err(|error| RustAuthError::Api(error.to_string()));
         }

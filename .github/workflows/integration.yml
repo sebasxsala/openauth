@@ -8,7 +8,6 @@ on:
       - release/0.3.0
   merge_group:
   workflow_dispatch:
-  workflow_dispatch:
 
 concurrency:
   group: integration-${{ github.workflow }}-${{ github.ref }}
@@ -65,7 +64,10 @@ jobs:
             nextest_args: --all-features --run-ignored only
           - package: rustauth-cli
             services: postgres mysql
-            nextest_args: --all-features --run-ignored only
+            nextest_args: >-
+              --all-features
+              --run-ignored only
+              --test-threads 1
           - package: rustauth
             services: postgres mysql
             nextest_args: --all-features --run-ignored only
