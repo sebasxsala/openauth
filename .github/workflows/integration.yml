@@ -64,7 +64,10 @@ jobs:
             nextest_args: --all-features --run-ignored only
           - package: rustauth-cli
             services: postgres mysql
-            nextest_args: --all-features --run-ignored only
+            nextest_args: >-
+              --all-features
+              --run-ignored only
+              --test-threads 1
           - package: rustauth
             services: postgres mysql
             nextest_args: --all-features --run-ignored only
