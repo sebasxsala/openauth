@@ -13,6 +13,9 @@ pub(crate) async fn validate_access_token(
         .await?
     {
         let active = timestamp(&record, "expires_at").is_some_and(|expires| expires > now());
+        if !active {
+            return Ok(Some(inactive_access_token()));
+        }
         let client_id = string(&record, "client_id");
         if authenticated_client_id
             .is_some_and(|expected_client_id| client_id.as_deref() != Some(expected_client_id))
@@ -30,16 +33,19 @@ pub(crate) async fn validate_access_token(
             }
             _ => user_id.clone(),
         };
+        let sid = active_session_id_for_claims(adapter, string(&record, "session_id")).await?;
         let mut claims = json!({
         "active": active,
         "token_type": "access_token",
         "client_id": client_id,
         "sub": sub,
-        "sid": string(&record, "session_id"),
         "exp": timestamp(&record, "expires_at").map(OffsetDateTime::unix_timestamp),
         "iat": timestamp(&record, "created_at").map(OffsetDateTime::unix_timestamp),
         "scope": join_scope(&scopes),
         });
+        if let (Value::Object(map), Some(sid)) = (&mut claims, sid) {
+            map.insert("sid".to_owned(), Value::String(sid));
+        }
         if let Some(resolver) = &options.custom_access_token_claims {
             if let Value::Object(map) = &mut claims {
                 let client = match client_id.as_deref() {
@@ -50,17 +56,29 @@ pub(crate) async fn validate_access_token(
                     Some(user_id) => find_user(adapter, user_id).await?,
                     None => None,
                 };
-                map.extend(
-                    resolver
-                        .resolve(CustomAccessTokenClaimsInput {
-                            user,
-                            reference_id: string(&record, "reference_id"),
-                            scopes: scopes.clone(),
-                            resource: Vec::new(),
-                            metadata: client.and_then(|client| client.metadata),
-                        })
-                        .await?,
-                );
+                let mut custom_claims = resolver
+                    .resolve(CustomAccessTokenClaimsInput {
+                        user,
+                        reference_id: string(&record, "reference_id"),
+                        scopes: scopes.clone(),
+                        resource: Vec::new(),
+                        metadata: client.and_then(|client| client.metadata),
+                    })
+                    .await?;
+                custom_claims.retain(|claim, _| {
+                    !matches!(
+                        claim.as_str(),
+                        "active"
+                            | "token_type"
+                            | "client_id"
+                            | "sub"
+                            | "sid"
+                            | "exp"
+                            | "iat"
+                            | "scope"
+                    )
+                });
+                map.extend(custom_claims);
             }
         }
         return Ok(Some(ValidatedAccessToken {
@@ -100,6 +118,11 @@ pub(crate) async fn validate_access_token(
                 }) {
                     return Ok(Some(inactive_access_token()));
                 }
+                let active_session_id = active_session_id_for_claims(
+                    adapter,
+                    claims.get("sid").and_then(Value::as_str).map(str::to_owned),
+                )
+                .await?;
                 let mut response = Value::Object(claims);
                 if let Value::Object(map) = &mut response {
                     map.insert("active".to_owned(), Value::Bool(true));
@@ -107,6 +130,9 @@ pub(crate) async fn validate_access_token(
                         "token_type".to_owned(),
                         Value::String("access_token".to_owned()),
                     );
+                    if active_session_id.is_none() {
+                        map.remove("sid");
+                    }
                     if let Some(client_id) = &client_id {
                         map.insert("client_id".to_owned(), Value::String(client_id.clone()));
                     }
@@ -194,19 +220,46 @@ async fn introspect_refresh_token(
             }
             let active = timestamp(&record, "revoked").is_none()
                 && timestamp(&record, "expires_at").is_some_and(|expires| expires > now());
-            return Ok(serde_json::json!({
+            if !active {
+                return Ok(serde_json::json!({ "active": false }));
+            }
+            let sid = active_session_id_for_claims(adapter, string(&record, "session_id")).await?;
+            let mut response = serde_json::json!({
                 "active": active,
                 "token_type": "refresh_token",
                 "client_id": string(&record, "client_id"),
                 "sub": string(&record, "user_id"),
-                "sid": string(&record, "session_id"),
                 "exp": timestamp(&record, "expires_at").map(OffsetDateTime::unix_timestamp),
                 "iat": timestamp(&record, "created_at").map(OffsetDateTime::unix_timestamp),
                 "scope": string_array(&record, "scopes").map(|scopes| scopes.join(" ")),
-            }));
+            });
+            if let (Value::Object(map), Some(sid)) = (&mut response, sid) {
+                map.insert("sid".to_owned(), Value::String(sid));
+            }
+            return Ok(response);
         }
     }
     Ok(serde_json::json!({ "active": false }))
+}
+
+async fn active_session_id_for_claims(
+    adapter: &dyn DbAdapter,
+    session_id: Option<String>,
+) -> Result<Option<String>, RustAuthError> {
+    let Some(session_id) = session_id else {
+        return Ok(None);
+    };
+    let Some(session) = adapter
+        .find_one(find_by_string("session", "id", &session_id))
+        .await?
+    else {
+        return Ok(None);
+    };
+    if timestamp(&session, "expires_at").is_some_and(|expires_at| expires_at > now()) {
+        Ok(Some(session_id))
+    } else {
+        Ok(None)
+    }
 }
 
 async fn stored_refresh_token_for_lookup(

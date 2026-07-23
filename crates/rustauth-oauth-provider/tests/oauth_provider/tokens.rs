@@ -1,4 +1,5 @@
 use super::common::*;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[tokio::test]
 async fn token_endpoint_missing_grant_type_returns_unsupported_grant_type(
@@ -279,6 +280,68 @@ async fn refresh_token_grant_rotates_and_revokes_previous_refresh_token(
     assert!(refresh_records
         .iter()
         .any(|record| matches!(record.get("revoked"), Some(DbValue::Timestamp(_)))));
+    Ok(())
+}
+
+#[tokio::test]
+async fn refresh_token_grant_allows_offline_access_after_sign_out(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let adapter = adapter();
+    seed_user_session(adapter.as_ref()).await?;
+    let cookie = signed_session_cookie("token_1")?;
+    let router = router(
+        oauth_provider(OAuthProviderOptions {
+            disable_jwt_plugin: true,
+            allow_dynamic_client_registration: true,
+            ..default_options()
+        })?,
+        Arc::clone(&adapter),
+    )?;
+    let client = register_client(
+        &router,
+        r#"{"redirect_uris":["https://rp.example/callback"],"scope":"openid offline_access","skip_consent":true}"#,
+        Some(&cookie),
+    )
+    .await?;
+    let client_id = client["client_id"].as_str().ok_or("missing client_id")?;
+    let client_secret = client["client_secret"]
+        .as_str()
+        .ok_or("missing client_secret")?;
+    let first = exchange_authorization_code(&router, &cookie, client_id, client_secret).await?;
+    let refresh_token = first["refresh_token"]
+        .as_str()
+        .ok_or("missing refresh_token")?;
+    let sign_out = router
+        .handle_async(request(
+            Method::POST,
+            "/api/auth/sign-out",
+            "{}",
+            Some(&cookie),
+        )?)
+        .await?;
+    assert_eq!(sign_out.status(), StatusCode::OK);
+    let body = format!(
+        "grant_type=refresh_token&client_id={client_id}&client_secret={client_secret}&refresh_token={}",
+        query_encode(refresh_token)
+    );
+
+    let response = router
+        .handle_async(form_request(Method::POST, "/api/auth/oauth2/token", &body)?)
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    let refreshed = json_body(response)?;
+    assert!(refreshed["access_token"]
+        .as_str()
+        .is_some_and(|value| !value.is_empty()));
+    assert!(refreshed["refresh_token"]
+        .as_str()
+        .is_some_and(|value| !value.is_empty()));
+    assert_ne!(
+        refreshed["refresh_token"].as_str(),
+        Some(refresh_token),
+        "refresh grant must rotate refresh tokens"
+    );
+    assert_eq!(adapter.len("session").await, 0);
     Ok(())
 }
 
@@ -590,6 +653,298 @@ async fn introspect_and_revoke_are_bound_to_authenticated_client(
     let body = json_body(response)?;
     assert_eq!(body["active"], true);
     assert_eq!(body["client_id"], client_a_id);
+    Ok(())
+}
+
+#[tokio::test]
+async fn introspection_keeps_tokens_active_after_sign_out_or_session_expiry_without_sid(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let opaque_adapter = adapter();
+    seed_user_session(opaque_adapter.as_ref()).await?;
+    let cookie = signed_session_cookie("token_1")?;
+    let opaque_router = router(
+        oauth_provider(OAuthProviderOptions {
+            disable_jwt_plugin: true,
+            allow_dynamic_client_registration: true,
+            ..default_options()
+        })?,
+        Arc::clone(&opaque_adapter),
+    )?;
+    let client = register_client(
+        &opaque_router,
+        r#"{"redirect_uris":["https://rp.example/callback"],"scope":"openid offline_access","skip_consent":true}"#,
+        Some(&cookie),
+    )
+    .await?;
+    let client_id = client["client_id"].as_str().ok_or("missing client_id")?;
+    let client_secret = client["client_secret"]
+        .as_str()
+        .ok_or("missing client_secret")?;
+    let tokens =
+        exchange_authorization_code(&opaque_router, &cookie, client_id, client_secret).await?;
+    let access_token = tokens["access_token"]
+        .as_str()
+        .ok_or("missing access_token")?;
+    let refresh_token = tokens["refresh_token"]
+        .as_str()
+        .ok_or("missing refresh_token")?;
+    for (token, hint) in [
+        (access_token, "access_token"),
+        (refresh_token, "refresh_token"),
+    ] {
+        let response = opaque_router
+            .handle_async(form_request(
+                Method::POST,
+                "/api/auth/oauth2/introspect",
+                &format!(
+                    "token={}&token_type_hint={hint}&client_id={client_id}&client_secret={}",
+                    query_encode(token),
+                    query_encode(client_secret)
+                ),
+            )?)
+            .await?;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = json_body(response)?;
+        assert_eq!(body["active"], true);
+        assert_eq!(body["sid"], "session_1");
+    }
+
+    let sign_out = opaque_router
+        .handle_async(request(
+            Method::POST,
+            "/api/auth/sign-out",
+            "{}",
+            Some(&cookie),
+        )?)
+        .await?;
+    assert_eq!(sign_out.status(), StatusCode::OK);
+
+    for (token, hint) in [
+        (access_token, "access_token"),
+        (refresh_token, "refresh_token"),
+    ] {
+        let response = opaque_router
+            .handle_async(form_request(
+                Method::POST,
+                "/api/auth/oauth2/introspect",
+                &format!(
+                    "token={}&token_type_hint={hint}&client_id={client_id}&client_secret={}",
+                    query_encode(token),
+                    query_encode(client_secret)
+                ),
+            )?)
+            .await?;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = json_body(response)?;
+        assert_eq!(body["active"], true);
+        assert!(body.get("sid").is_none());
+    }
+
+    let adapter = adapter();
+    seed_user_session(adapter.as_ref()).await?;
+    let cookie = signed_session_cookie("token_1")?;
+    let router = router(
+        oauth_provider(OAuthProviderOptions {
+            allow_dynamic_client_registration: true,
+            valid_audiences: vec!["https://api.example.com".to_owned()],
+            ..default_options()
+        })?,
+        Arc::clone(&adapter),
+    )?;
+    let client = register_client(
+        &router,
+        r#"{"redirect_uris":["https://rp.example/callback"],"scope":"openid offline_access","skip_consent":true}"#,
+        Some(&cookie),
+    )
+    .await?;
+    let client_id = client["client_id"].as_str().ok_or("missing client_id")?;
+    let client_secret = client["client_secret"]
+        .as_str()
+        .ok_or("missing client_secret")?;
+    let tokens = exchange_authorization_code_with_resource(
+        &router,
+        &cookie,
+        client_id,
+        client_secret,
+        Some("https://api.example.com"),
+    )
+    .await?;
+    let access_token = tokens["access_token"]
+        .as_str()
+        .ok_or("missing access_token")?;
+
+    let response = router
+        .handle_async(form_request(
+            Method::POST,
+            "/api/auth/oauth2/introspect",
+            &format!(
+                "token={}&token_type_hint=access_token&client_id={client_id}&client_secret={}",
+                query_encode(access_token),
+                query_encode(client_secret)
+            ),
+        )?)
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response)?;
+    assert_eq!(body["active"], true);
+    assert_eq!(body["sid"], "session_1");
+
+    adapter
+        .update(
+            Update::new("session")
+                .where_clause(Where::new("id", DbValue::String("session_1".to_owned())))
+                .data(
+                    "expires_at",
+                    DbValue::Timestamp(OffsetDateTime::now_utc() - Duration::seconds(1)),
+                ),
+        )
+        .await?;
+
+    let response = router
+        .handle_async(form_request(
+            Method::POST,
+            "/api/auth/oauth2/introspect",
+            &format!(
+                "token={}&token_type_hint=access_token&client_id={client_id}&client_secret={}",
+                query_encode(access_token),
+                query_encode(client_secret)
+            ),
+        )?)
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response)?;
+    assert_eq!(body["active"], true);
+    assert!(body.get("sid").is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn inactive_token_introspection_returns_only_active_false(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let adapter = adapter();
+    seed_user_session(adapter.as_ref()).await?;
+    let cookie = signed_session_cookie("token_1")?;
+    let resolver_calls = Arc::new(AtomicUsize::new(0));
+    let resolver_calls_for_callback = Arc::clone(&resolver_calls);
+    let router = router(
+        oauth_provider(OAuthProviderOptions {
+            disable_jwt_plugin: true,
+            allow_dynamic_client_registration: true,
+            custom_access_token_claims: Some(CustomAccessTokenClaimsResolver::new(move |_| {
+                let resolver_calls = Arc::clone(&resolver_calls_for_callback);
+                async move {
+                    resolver_calls.fetch_add(1, Ordering::SeqCst);
+                    Ok(serde_json::Map::new())
+                }
+            })),
+            ..default_options()
+        })?,
+        Arc::clone(&adapter),
+    )?;
+    let client = register_client(
+        &router,
+        r#"{"redirect_uris":["https://rp.example/callback"],"scope":"openid offline_access","skip_consent":true}"#,
+        Some(&cookie),
+    )
+    .await?;
+    let client_id = client["client_id"].as_str().ok_or("missing client_id")?;
+    let client_secret = client["client_secret"]
+        .as_str()
+        .ok_or("missing client_secret")?;
+    let tokens = exchange_authorization_code(&router, &cookie, client_id, client_secret).await?;
+    let access_token = tokens["access_token"]
+        .as_str()
+        .ok_or("missing access_token")?;
+    let refresh_token = tokens["refresh_token"]
+        .as_str()
+        .ok_or("missing refresh_token")?;
+    let resolver_calls_before_introspection = resolver_calls.load(Ordering::SeqCst);
+
+    adapter
+        .update(
+            Update::new("oauth_access_token")
+                .where_clause(Where::new(
+                    "client_id",
+                    DbValue::String(client_id.to_owned()),
+                ))
+                .data(
+                    "expires_at",
+                    DbValue::Timestamp(OffsetDateTime::now_utc() - Duration::seconds(1)),
+                ),
+        )
+        .await?;
+    let response = router
+        .handle_async(form_request(
+            Method::POST,
+            "/api/auth/oauth2/introspect",
+            &format!(
+                "token={}&token_type_hint=access_token&client_id={client_id}&client_secret={}",
+                query_encode(access_token),
+                query_encode(client_secret)
+            ),
+        )?)
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(json_body(response)?, json!({ "active": false }));
+    assert_eq!(
+        resolver_calls.load(Ordering::SeqCst),
+        resolver_calls_before_introspection
+    );
+
+    adapter
+        .update(
+            Update::new("oauth_refresh_token")
+                .where_clause(Where::new(
+                    "client_id",
+                    DbValue::String(client_id.to_owned()),
+                ))
+                .data(
+                    "expires_at",
+                    DbValue::Timestamp(OffsetDateTime::now_utc() - Duration::seconds(1)),
+                ),
+        )
+        .await?;
+    let response = router
+        .handle_async(form_request(
+            Method::POST,
+            "/api/auth/oauth2/introspect",
+            &format!(
+                "token={}&token_type_hint=refresh_token&client_id={client_id}&client_secret={}",
+                query_encode(refresh_token),
+                query_encode(client_secret)
+            ),
+        )?)
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(json_body(response)?, json!({ "active": false }));
+
+    adapter
+        .update(
+            Update::new("oauth_refresh_token")
+                .where_clause(Where::new(
+                    "client_id",
+                    DbValue::String(client_id.to_owned()),
+                ))
+                .data(
+                    "expires_at",
+                    DbValue::Timestamp(OffsetDateTime::now_utc() + Duration::hours(1)),
+                )
+                .data("revoked", DbValue::Timestamp(OffsetDateTime::now_utc())),
+        )
+        .await?;
+    let response = router
+        .handle_async(form_request(
+            Method::POST,
+            "/api/auth/oauth2/introspect",
+            &format!(
+                "token={}&token_type_hint=refresh_token&client_id={client_id}&client_secret={}",
+                query_encode(refresh_token),
+                query_encode(client_secret)
+            ),
+        )?)
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(json_body(response)?, json!({ "active": false }));
     Ok(())
 }
 
@@ -1051,6 +1406,109 @@ async fn custom_access_and_userinfo_claims_are_added() -> Result<(), Box<dyn std
         json_body(userinfo)?["https://example.com/userinfo"],
         "custom"
     );
+    Ok(())
+}
+
+#[tokio::test]
+async fn custom_access_claims_cannot_override_reserved_introspection_claims(
+) -> Result<(), Box<dyn std::error::Error>> {
+    let adapter = adapter();
+    seed_user_session(adapter.as_ref()).await?;
+    let cookie = signed_session_cookie("token_1")?;
+    let router = router(
+        oauth_provider(OAuthProviderOptions {
+            disable_jwt_plugin: true,
+            allow_dynamic_client_registration: true,
+            custom_access_token_claims: Some(CustomAccessTokenClaimsResolver::new(|_| async {
+                Ok(serde_json::Map::from_iter([
+                    ("active".to_owned(), json!(false)),
+                    ("token_type".to_owned(), json!("custom")),
+                    ("client_id".to_owned(), json!("custom_client")),
+                    ("sub".to_owned(), json!("custom_user")),
+                    ("sid".to_owned(), json!("session_1")),
+                    ("exp".to_owned(), json!(0)),
+                    ("iat".to_owned(), json!(0)),
+                    ("scope".to_owned(), json!("custom:scope")),
+                    (
+                        "https://example.com/role".to_owned(),
+                        json!("administrator"),
+                    ),
+                ]))
+            })),
+            ..default_options()
+        })?,
+        adapter,
+    )?;
+    let client = register_client(
+        &router,
+        r#"{"redirect_uris":["https://rp.example/callback"],"scope":"openid offline_access","skip_consent":true}"#,
+        Some(&cookie),
+    )
+    .await?;
+    let client_id = client["client_id"].as_str().ok_or("missing client_id")?;
+    let client_secret = client["client_secret"]
+        .as_str()
+        .ok_or("missing client_secret")?;
+    let tokens = exchange_authorization_code(&router, &cookie, client_id, client_secret).await?;
+    let access_token = tokens["access_token"]
+        .as_str()
+        .ok_or("missing access_token")?;
+
+    let response = router
+        .handle_async(form_request(
+            Method::POST,
+            "/api/auth/oauth2/introspect",
+            &format!(
+                "token={}&token_type_hint=access_token&client_id={client_id}&client_secret={}",
+                query_encode(access_token),
+                query_encode(client_secret)
+            ),
+        )?)
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response)?;
+    assert_eq!(body["active"], true);
+    assert_eq!(body["token_type"], "access_token");
+    assert_eq!(body["client_id"], client_id);
+    assert_eq!(body["sub"], "user_1");
+    assert_eq!(body["sid"], "session_1");
+    assert_eq!(body["scope"], "openid offline_access");
+    assert!(body["exp"].as_i64().is_some_and(|value| value > 0));
+    assert!(body["iat"].as_i64().is_some_and(|value| value > 0));
+    assert_eq!(body["https://example.com/role"], "administrator");
+
+    let sign_out = router
+        .handle_async(request(
+            Method::POST,
+            "/api/auth/sign-out",
+            "{}",
+            Some(&cookie),
+        )?)
+        .await?;
+    assert_eq!(sign_out.status(), StatusCode::OK);
+
+    let response = router
+        .handle_async(form_request(
+            Method::POST,
+            "/api/auth/oauth2/introspect",
+            &format!(
+                "token={}&token_type_hint=access_token&client_id={client_id}&client_secret={}",
+                query_encode(access_token),
+                query_encode(client_secret)
+            ),
+        )?)
+        .await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = json_body(response)?;
+    assert_eq!(body["active"], true);
+    assert_eq!(body["token_type"], "access_token");
+    assert_eq!(body["client_id"], client_id);
+    assert_eq!(body["sub"], "user_1");
+    assert!(body.get("sid").is_none());
+    assert_eq!(body["scope"], "openid offline_access");
+    assert!(body["exp"].as_i64().is_some_and(|value| value > 0));
+    assert!(body["iat"].as_i64().is_some_and(|value| value > 0));
+    assert_eq!(body["https://example.com/role"], "administrator");
     Ok(())
 }
 
