@@ -127,3 +127,20 @@ cargo nextest run -p <touched-crate> --all-features
 - Do not hardcode future release versions in docs.
 - Do not delete build artifacts, `target/`, or `/private/tmp` caches unless
   explicitly asked.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and PRDs are tracked in GitHub Issues for `salasebas/rustauth`. See
+`docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Triage uses the default five-label vocabulary. See
+`docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This is a single-context repository with one root `CONTEXT.md` and system-wide
+ADRs in `docs/adr/`. See `docs/agents/domain.md`.
