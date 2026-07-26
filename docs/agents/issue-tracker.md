@@ -1,6 +1,14 @@
-# Issue tracker: GitHub
+# Issue tracker routing
 
-Issues and PRDs for this repo live as GitHub issues. Use the `gh` CLI for all operations.
+Public requests and external collaboration for this repository use GitHub Issues.
+Private planning initiated by the maintainer uses the private `OpenAuth` Linear
+team and `rustauth` project.
+
+Keep private planning details in Linear. When private planning produces a public
+work item, copy only the context needed for external collaboration and safe for
+public disclosure into GitHub.
+
+Use the `gh` CLI for GitHub operations.
 
 ## Conventions
 
