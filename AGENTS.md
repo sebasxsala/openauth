@@ -16,6 +16,7 @@ In this Rust workspace:
 - Prefer existing module boundaries, naming, error styles, and feature flags.
 - Keep diffs focused. Do not mix docs cleanup, behavior changes, and dependency
   upgrades unless the task asks for it.
+- Use English for all repository content and collaboration.
 - Use `rg` / `rg --files` for searches.
 - Preserve user changes in the worktree and work around them.
 - Do not commit upstream clones, generated trees, build artifacts, or local
@@ -132,8 +133,10 @@ cargo nextest run -p <touched-crate> --all-features
 
 ### Issue tracker
 
-Issues and PRDs are tracked in GitHub Issues for `salasebas/rustauth`. See
-`docs/agents/issue-tracker.md`.
+Public requests and external collaboration use GitHub Issues. Private planning
+initiated by the maintainer uses the private `OpenAuth` Linear team and
+`rustauth` project. See `docs/agents/issue-tracker.md` for routing and privacy
+rules.
 
 ### Triage labels
 
